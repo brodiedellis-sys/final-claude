@@ -40,17 +40,23 @@ SAVED_MODEL_DIR = PROJECT_ROOT / "models" / "model5_innovation" / "saved_model"
 
 def train_model(X_train, y_train_encoded, n_classes):
     """Train XGBoost for multi-class LOS prediction."""
+    if n_classes == 2:
+        objective = "binary:logistic"
+        eval_metric = "auc"
+    else:
+        objective = "multi:softprob"
+        eval_metric = "mlogloss"
+
     model = XGBClassifier(
-        n_estimators=400,
-        max_depth=6,
+        n_estimators=500,
+        max_depth=5,
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
         min_child_weight=5,
         gamma=0.1,
-        objective="multi:softprob",
-        num_class=n_classes,
-        eval_metric="mlogloss",
+        objective=objective,
+        eval_metric=eval_metric,
         random_state=42,
         n_jobs=-1,
     )

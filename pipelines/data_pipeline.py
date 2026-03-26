@@ -58,7 +58,7 @@ NUMERIC_FEATURES = [
     "num_med_changes", "num_active_meds",
     "total_prior_visits", "has_prior_inpatient", "has_prior_emergency",
     "inpatient_squared", "inpatient_log", "high_utilizer",
-    "emergency_inpatient_interaction",
+    "emergency_inpatient_interaction", "outpatient_inpatient_ratio",
     "lab_procedure_ratio", "total_procedures",
     "high_med_burden", "med_count_log", "high_diagnosis_count",
     "A1C_not_tested", "A1C_abnormal", "glu_not_tested", "glu_abnormal",
@@ -70,7 +70,7 @@ CATEGORICAL_FEATURES = [
     "change", "diabetesMed",
     "diag_1_group", "diag_2_group", "diag_3_group",
     "admission_type_id", "discharge_disposition_id", "admission_source_id",
-    "medical_specialty",
+    "medical_specialty", "inpatient_tier",
 ]
 
 
@@ -203,6 +203,16 @@ def clean_encounters(df, filter_deceased=True, create_target=True):
         df["high_utilizer"] = (df["number_inpatient"] >= 3).astype(int)
         df["emergency_inpatient_interaction"] = (
             df["number_emergency"] * df["number_inpatient"]
+        )
+        # Inpatient risk tiers (captures non-linear jump in readmission rates)
+        df["inpatient_tier"] = pd.cut(
+            df["number_inpatient"],
+            bins=[-1, 0, 1, 2, 100],
+            labels=["none", "low", "medium", "high"],
+        ).astype(str)
+        # Total prior utilization interaction
+        df["outpatient_inpatient_ratio"] = (
+            df["number_outpatient"] / (df["number_inpatient"] + 1)
         )
 
     # Lab/procedure intensity
@@ -494,13 +504,11 @@ LOS_BINS = {
 
 
 def categorize_los(days):
-    """Categorize length of stay."""
-    if days <= 3:
+    """Categorize length of stay as binary: short vs extended."""
+    if days <= 4:
         return "short_stay"
-    elif days <= 7:
-        return "medium_stay"
     else:
-        return "long_stay"
+        return "extended_stay"
 
 
 def prepare_los_data(filepath=None, test_size=0.2, random_state=42):

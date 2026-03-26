@@ -2,7 +2,7 @@
 """
 Model 4: NLP Classification — Prediction Script
 =================================================
-Loads trained NLP model and generates predictions on raw test data.
+Loads trained NLP ensemble and generates predictions on raw test data.
 Output: test_data/model4_results.csv
 """
 import sys
@@ -14,6 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import pandas as pd
 import joblib
+from scipy.sparse import hstack, csr_matrix
 from pipelines.data_pipeline import (
     preprocess_reviews_for_prediction, clean_review_text, find_test_csv,
 )
@@ -24,9 +25,11 @@ OUTPUT_FILE = TEST_DATA_DIR / "model4_results.csv"
 
 
 def main():
-    # Load model and vectorizer
+    # Load all artifacts
     model = joblib.load(MODEL_DIR / "model.joblib")
     vectorizer = joblib.load(MODEL_DIR / "vectorizer.joblib")
+    char_vectorizer = joblib.load(MODEL_DIR / "char_vectorizer.joblib")
+    meta_scaler = joblib.load(MODEL_DIR / "meta_scaler.joblib")
 
     # Find test data
     test_csv = find_test_csv(
@@ -41,8 +44,25 @@ def main():
     df = preprocess_reviews_for_prediction(raw_df)
     texts = df["review_text_clean"].values
 
+    # Extract text-derived metadata
+    df["review_length"] = df["review_text_clean"].str.len()
+    df["word_count"] = df["review_text_clean"].str.split().str.len()
+    df["exclamation_count"] = df["review_text_clean"].str.count("!")
+    df["question_count"] = df["review_text_clean"].str.count("\\?")
+    se_col = raw_df["sideEffectsReview"].fillna("") if "sideEffectsReview" in raw_df.columns else ""
+    df["has_side_effects"] = pd.Series(se_col).str.len().gt(5).astype(int)
+    df["avg_word_length"] = df["review_text_clean"].apply(
+        lambda x: np.mean([len(w) for w in x.split()]) if x.strip() else 0
+    )
+
+    metadata = df[["review_length", "word_count", "exclamation_count",
+                    "question_count", "has_side_effects", "avg_word_length"]].values
+
     # Vectorize
-    X = vectorizer.transform(texts)
+    X_tfidf = vectorizer.transform(texts)
+    X_char = char_vectorizer.transform(texts)
+    meta_scaled = csr_matrix(meta_scaler.transform(metadata))
+    X = hstack([X_tfidf, X_char, meta_scaled])
 
     # Predict
     y_pred = model.predict(X)
