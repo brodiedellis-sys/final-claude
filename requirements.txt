@@ -1,9 +1,8 @@
-numpy
-pandas
-scikit-learn
-xgboost
-onnxruntime
-Pillow
-streamlit
-joblib
-altair<5
+streamlit==1.40.0
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+xgboost==2.1.3
+onnxruntime==1.20.1
+Pillow==10.4.0
+joblib==1.4.2
