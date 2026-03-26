@@ -53,19 +53,19 @@ def load_model1():
 @st.cache_resource
 def load_model2():
     import joblib
-    import tensorflow as tf
+    import onnxruntime as ort
     model_dir = PROJECT_ROOT / "models" / "model2_deep_learning" / "saved_model"
-    model = tf.keras.models.load_model(model_dir / "model.keras")
+    session = ort.InferenceSession(str(model_dir / "model.onnx"))
     preprocessor = joblib.load(model_dir / "preprocessor.joblib")
     feature_cols = joblib.load(model_dir / "feature_cols.joblib")
-    return model, preprocessor, feature_cols
+    return session, preprocessor, feature_cols
 
 
 @st.cache_resource
 def load_model3():
-    import tensorflow as tf
+    import onnxruntime as ort
     model_dir = PROJECT_ROOT / "models" / "model3_cnn" / "saved_model"
-    return tf.keras.models.load_model(model_dir / "model.keras")
+    return ort.InferenceSession(str(model_dir / "model.onnx"))
 
 
 @st.cache_resource
@@ -287,7 +287,7 @@ elif model_choice == "Model 2: Readmission Risk (Deep Learning)":
 
     if st.button("Predict Readmission Risk (DNN)", type="primary"):
         from pipelines.data_pipeline import preprocess_encounters_for_prediction
-        model, preprocessor, feature_cols = load_model2()
+        session, preprocessor, feature_cols = load_model2()
         X, _ = preprocess_encounters_for_prediction(
             pd.DataFrame([{**inputs, "encounter_id": 0, "patient_nbr": 0,
                           "weight": "?", "payer_code": "?", "medical_specialty": "?",
@@ -303,7 +303,9 @@ elif model_choice == "Model 2: Readmission Risk (Deep Learning)":
                           "insulin": inputs["insulin"]}]),
             preprocessor, feature_cols,
         )
-        proba = float(model.predict(X, verbose=0).flatten()[0])
+        input_name = session.get_inputs()[0].name
+        result = session.run(None, {input_name: np.array(X, dtype=np.float32)})
+        proba = float(result[0].flatten()[0])
         pred = int(proba >= 0.5)
 
         col_r1, col_r2 = st.columns(2)
@@ -337,12 +339,14 @@ elif model_choice == "Model 3: Retinopathy Detection (CNN)":
         st.image(image, caption="Uploaded Retinal Scan", width=400)
 
         if st.button("Analyze Image", type="primary"):
-            model = load_model3()
+            session = load_model3()
             img_resized = image.resize((224, 224))
             img_array = np.array(img_resized, dtype=np.float32) / 255.0
             img_batch = np.expand_dims(img_array, axis=0)
 
-            proba = float(model.predict(img_batch, verbose=0).flatten()[0])
+            input_name = session.get_inputs()[0].name
+            result = session.run(None, {input_name: img_batch})
+            proba = float(result[0].flatten()[0])
             pred = int(proba >= 0.5)
             confidence = max(proba, 1 - proba)
 

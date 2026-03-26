@@ -2,7 +2,7 @@
 """
 Model 2: Deep Learning — Prediction Script
 ============================================
-Loads trained Keras DNN and generates predictions on raw test data.
+Loads trained DNN (ONNX or Keras) and generates predictions on raw test data.
 Output: test_data/model2_results.csv
 """
 import sys
@@ -14,7 +14,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import numpy as np
 import pandas as pd
 import joblib
-import tensorflow as tf
 from pipelines.data_pipeline import (
     clean_encounters, find_test_csv, preprocess_encounters_for_prediction,
 )
@@ -24,13 +23,39 @@ TEST_DATA_DIR = PROJECT_ROOT / "test_data"
 OUTPUT_FILE = TEST_DATA_DIR / "model2_results.csv"
 
 
-def main():
-    # Load saved artifacts
+def load_model():
+    """Load model - try ONNX first, fall back to Keras."""
+    onnx_path = MODEL_DIR / "model.onnx"
+    if onnx_path.exists():
+        try:
+            import onnxruntime as ort
+            session = ort.InferenceSession(str(onnx_path))
+            return ("onnx", session)
+        except ImportError:
+            pass
+    # Fallback to Keras
+    import tensorflow as tf
     model = tf.keras.models.load_model(MODEL_DIR / "model.keras")
+    return ("keras", model)
+
+
+def predict_with_model(model_tuple, X):
+    """Run prediction with either ONNX or Keras model."""
+    model_type, model = model_tuple
+    X = np.array(X, dtype=np.float32)
+    if model_type == "onnx":
+        input_name = model.get_inputs()[0].name
+        result = model.run(None, {input_name: X})
+        return result[0].flatten()
+    else:
+        return model.predict(X, verbose=0).flatten()
+
+
+def main():
+    model_tuple = load_model()
     preprocessor = joblib.load(MODEL_DIR / "preprocessor.joblib")
     feature_cols = joblib.load(MODEL_DIR / "feature_cols.joblib")
 
-    # Find and load test data
     test_csv = find_test_csv(
         TEST_DATA_DIR,
         expected_columns=["encounter_id", "patient_nbr"],
@@ -39,15 +64,12 @@ def main():
     raw_df = pd.read_csv(test_csv)
     print(f"Loaded test data: {test_csv.name} ({len(raw_df)} rows)")
 
-    # Preprocess
     X, df_clean = preprocess_encounters_for_prediction(raw_df, preprocessor, feature_cols)
 
-    # Predict
-    y_proba = model.predict(X, verbose=0).flatten()
+    y_proba = predict_with_model(model_tuple, X)
     y_pred = (y_proba >= 0.5).astype(int)
     confidence = np.maximum(y_proba, 1 - y_proba)
 
-    # Build output
     id_col = raw_df["encounter_id"] if "encounter_id" in raw_df.columns else range(len(raw_df))
 
     results = pd.DataFrame({

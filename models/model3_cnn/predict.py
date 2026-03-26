@@ -2,7 +2,7 @@
 """
 Model 3: CNN — Prediction Script
 ==================================
-Loads trained CNN and generates predictions on test retinal images.
+Loads trained CNN (ONNX or Keras) and generates predictions on test retinal images.
 Output: test_data/model3_results.csv
 """
 import sys
@@ -13,7 +13,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from PIL import Image
 from pipelines.data_pipeline import find_test_images
 
@@ -23,12 +22,36 @@ OUTPUT_FILE = TEST_DATA_DIR / "model3_results.csv"
 IMG_SIZE = (224, 224)
 
 
-def load_and_preprocess_images(image_dir):
-    """Load all PNG images from directory."""
-    image_dir = Path(image_dir)
-    images = []
-    image_ids = []
+def load_model():
+    """Load model - try ONNX first, fall back to Keras."""
+    onnx_path = MODEL_DIR / "model.onnx"
+    if onnx_path.exists():
+        try:
+            import onnxruntime as ort
+            session = ort.InferenceSession(str(onnx_path))
+            return ("onnx", session)
+        except ImportError:
+            pass
+    import tensorflow as tf
+    model = tf.keras.models.load_model(MODEL_DIR / "model.keras")
+    return ("keras", model)
 
+
+def predict_with_model(model_tuple, X):
+    """Run prediction with either ONNX or Keras model."""
+    model_type, model = model_tuple
+    X = np.array(X, dtype=np.float32)
+    if model_type == "onnx":
+        input_name = model.get_inputs()[0].name
+        result = model.run(None, {input_name: X})
+        return result[0].flatten()
+    else:
+        return model.predict(X, verbose=0).flatten()
+
+
+def load_and_preprocess_images(image_dir):
+    image_dir = Path(image_dir)
+    images, image_ids = [], []
     for img_path in sorted(image_dir.glob("*.png")):
         try:
             img = Image.open(img_path).convert("RGB")
@@ -38,20 +61,15 @@ def load_and_preprocess_images(image_dir):
             image_ids.append(img_path.name)
         except Exception as e:
             print(f"Warning: Could not load {img_path.name}: {e}")
-            continue
-
     return np.array(images), image_ids
 
 
 def main():
-    # Load model
-    model = tf.keras.models.load_model(MODEL_DIR / "model.keras")
+    model_tuple = load_model()
 
-    # Find test images
     try:
         image_dir = find_test_images(TEST_DATA_DIR)
     except FileNotFoundError:
-        # Fallback: use raw data images for testing
         image_dir = PROJECT_ROOT / "data" / "raw" / "retinal_scan_images"
         if not image_dir.exists():
             print("ERROR: No test images found")
@@ -65,8 +83,7 @@ def main():
         print("ERROR: No images loaded")
         return
 
-    # Predict
-    y_proba = model.predict(images, verbose=0).flatten()
+    y_proba = predict_with_model(model_tuple, images)
     y_pred = (y_proba >= 0.5).astype(int)
     confidence = np.maximum(y_proba, 1 - y_proba)
 
