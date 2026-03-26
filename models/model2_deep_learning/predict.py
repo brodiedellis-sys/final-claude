@@ -2,61 +2,64 @@
 """
 Model 2: Deep Learning — Prediction Script
 ============================================
-Loads your trained model and generates predictions on test data.
-
-Usage: python predict.py
+Loads trained Keras DNN and generates predictions on raw test data.
 Output: test_data/model2_results.csv
 """
-import pandas as pd
+import sys
 from pathlib import Path
 
-# Paths
-MODEL_PATH = Path("models/model2_deep_learning/saved_model/")
-TEST_DATA_DIR = Path("test_data/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import pandas as pd
+import joblib
+import tensorflow as tf
+from pipelines.data_pipeline import (
+    clean_encounters, find_test_csv, preprocess_encounters_for_prediction,
+)
+
+MODEL_DIR = PROJECT_ROOT / "models" / "model2_deep_learning" / "saved_model"
+TEST_DATA_DIR = PROJECT_ROOT / "test_data"
 OUTPUT_FILE = TEST_DATA_DIR / "model2_results.csv"
 
 
-def load_model():
-    """Load your trained model from saved_model/.
-
-    TensorFlow / Keras:
-        import tensorflow as tf
-        model = tf.keras.models.load_model(MODEL_PATH / "model.keras")
-    """
-    # TODO: Load your saved model
-    raise NotImplementedError("Load your trained model here")
-
-
-def predict(model, test_data):
-    """Generate predictions on test data.
-
-    Should return a DataFrame with columns: id, prediction, probability, confidence
-    """
-    # TODO: Run your model on the test data
-    raise NotImplementedError("Generate predictions here")
-
-
 def main():
-    # Load model
-    model = load_model()
+    # Load saved artifacts
+    model = tf.keras.models.load_model(MODEL_DIR / "model.keras")
+    preprocessor = joblib.load(MODEL_DIR / "preprocessor.joblib")
+    feature_cols = joblib.load(MODEL_DIR / "feature_cols.joblib")
 
-    # Load test data
-    # TODO: Update this path to match your test data file
-    # test_df = pd.read_csv(TEST_DATA_DIR / "test_data_file.csv")
+    # Find and load test data
+    test_csv = find_test_csv(
+        TEST_DATA_DIR,
+        expected_columns=["encounter_id", "patient_nbr"],
+        name_hint="encounter",
+    )
+    raw_df = pd.read_csv(test_csv)
+    print(f"Loaded test data: {test_csv.name} ({len(raw_df)} rows)")
 
-    # Generate predictions
-    # predictions = predict(model, test_df)
+    # Preprocess
+    X, df_clean = preprocess_encounters_for_prediction(raw_df, preprocessor, feature_cols)
 
-    # Save results — MUST match output template exactly
-    # results = pd.DataFrame({
-    #     "id": test_df["id"],
-    #     "prediction": predictions,
-    #     "probability": raw_probabilities,
-    #     "confidence": confidence_scores,
-    # })
-    # results.to_csv(OUTPUT_FILE, index=False)
+    # Predict
+    y_proba = model.predict(X, verbose=0).flatten()
+    y_pred = (y_proba >= 0.5).astype(int)
+    confidence = np.maximum(y_proba, 1 - y_proba)
 
-    print(f"Predictions saved to {OUTPUT_FILE}")
+    # Build output
+    id_col = raw_df["encounter_id"] if "encounter_id" in raw_df.columns else range(len(raw_df))
+
+    results = pd.DataFrame({
+        "id": id_col.values if hasattr(id_col, 'values') else id_col,
+        "prediction": y_pred,
+        "probability": np.round(y_proba, 4),
+        "confidence": np.round(confidence, 4),
+    })
+
+    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    results.to_csv(OUTPUT_FILE, index=False)
+    print(f"Predictions saved to {OUTPUT_FILE} ({len(results)} rows)")
 
 
 if __name__ == "__main__":

@@ -2,79 +2,83 @@
 """
 Model 3: CNN — Prediction Script
 ==================================
-Loads your trained model and generates predictions on test data.
-
-Usage: python predict.py
+Loads trained CNN and generates predictions on test retinal images.
 Output: test_data/model3_results.csv
 """
-import pandas as pd
+import sys
 from pathlib import Path
 
-# Paths
-MODEL_PATH = Path("models/model3_cnn/saved_model/")
-TEST_DATA_DIR = Path("test_data/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from PIL import Image
+from pipelines.data_pipeline import find_test_images
+
+MODEL_DIR = PROJECT_ROOT / "models" / "model3_cnn" / "saved_model"
+TEST_DATA_DIR = PROJECT_ROOT / "test_data"
 OUTPUT_FILE = TEST_DATA_DIR / "model3_results.csv"
-
-
-def load_model():
-    """Load your trained CNN model from saved_model/.
-
-    TensorFlow / Keras:
-        import tensorflow as tf
-        model = tf.keras.models.load_model(MODEL_PATH / "model.keras")
-    """
-    # TODO: Load your saved model
-    raise NotImplementedError("Load your trained model here")
+IMG_SIZE = (224, 224)
 
 
 def load_and_preprocess_images(image_dir):
-    """Load images from the test_data/ image folder and apply transforms.
+    """Load all PNG images from directory."""
+    image_dir = Path(image_dir)
+    images = []
+    image_ids = []
 
-    Example using Keras:
-        from tensorflow.keras.preprocessing.image import load_img, img_to_array
-        import numpy as np
-
-        images, ids = [], []
-        for img_path in sorted(Path(image_dir).glob("*.png")):
-            img = load_img(img_path, target_size=(224, 224))
-            img_array = img_to_array(img) / 255.0
+    for img_path in sorted(image_dir.glob("*.png")):
+        try:
+            img = Image.open(img_path).convert("RGB")
+            img = img.resize(IMG_SIZE)
+            img_array = np.array(img, dtype=np.float32) / 255.0
             images.append(img_array)
-            ids.append(img_path.name)
-        return np.array(images), ids
-    """
-    # TODO: Load and preprocess images
-    raise NotImplementedError("Load and preprocess images here")
+            image_ids.append(img_path.name)
+        except Exception as e:
+            print(f"Warning: Could not load {img_path.name}: {e}")
+            continue
 
-
-def predict(model, images):
-    """Generate predictions on image data.
-
-    Should return a DataFrame with columns: image_id, predicted_class, confidence
-    """
-    # TODO: Run your model on the images
-    raise NotImplementedError("Generate predictions here")
+    return np.array(images), image_ids
 
 
 def main():
     # Load model
-    model = load_model()
+    model = tf.keras.models.load_model(MODEL_DIR / "model.keras")
 
-    # Load test images from test_data/ image folder
-    # TODO: Update this path to match your test image folder
-    # images, image_ids = load_and_preprocess_images(TEST_DATA_DIR / "images")
+    # Find test images
+    try:
+        image_dir = find_test_images(TEST_DATA_DIR)
+    except FileNotFoundError:
+        # Fallback: use raw data images for testing
+        image_dir = PROJECT_ROOT / "data" / "raw" / "retinal_scan_images"
+        if not image_dir.exists():
+            print("ERROR: No test images found")
+            return
 
-    # Generate predictions
-    # predictions = predict(model, images)
+    print(f"Loading images from {image_dir}")
+    images, image_ids = load_and_preprocess_images(image_dir)
+    print(f"Loaded {len(images)} images")
 
-    # Save results — MUST match output template exactly
-    # results = pd.DataFrame({
-    #     "image_id": image_ids,
-    #     "predicted_class": predicted_classes,
-    #     "confidence": confidence_scores,
-    # })
-    # results.to_csv(OUTPUT_FILE, index=False)
+    if len(images) == 0:
+        print("ERROR: No images loaded")
+        return
 
-    print(f"Predictions saved to {OUTPUT_FILE}")
+    # Predict
+    y_proba = model.predict(images, verbose=0).flatten()
+    y_pred = (y_proba >= 0.5).astype(int)
+    confidence = np.maximum(y_proba, 1 - y_proba)
+
+    results = pd.DataFrame({
+        "image_id": image_ids,
+        "predicted_class": y_pred,
+        "confidence": np.round(confidence, 4),
+    })
+
+    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    results.to_csv(OUTPUT_FILE, index=False)
+    print(f"Predictions saved to {OUTPUT_FILE} ({len(results)} rows)")
 
 
 if __name__ == "__main__":

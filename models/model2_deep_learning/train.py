@@ -1,131 +1,180 @@
 #!/usr/bin/env python3
 """
-Model 2: Deep Learning — Training Script
-==========================================
-Train a deep neural network on the same tabular data as Model 1.
-Compare performance against your traditional ML model.
-
-Framework: TensorFlow / Keras
+Model 2: Deep Learning — Keras DNN Readmission Prediction
+==========================================================
+Binary classification using a deep neural network.
+Compared against Model 1 (XGBoost).
 """
+import sys
 from pathlib import Path
 
-PROCESSED_DATA = Path("data/processed/")
-SAVED_MODEL_DIR = Path("models/model2_deep_learning/saved_model/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import joblib
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+import tensorflow as tf
+from tensorflow import keras
+from sklearn.metrics import (
+    classification_report, confusion_matrix, roc_auc_score, f1_score
+)
+from pipelines.data_pipeline import prepare_encounter_data
+
+SAVED_MODEL_DIR = PROJECT_ROOT / "models" / "model2_deep_learning" / "saved_model"
 
 
-def load_data():
-    """Load preprocessed data from data/processed/.
+def build_model(input_dim):
+    """Build a 4-layer DNN with dropout and batch normalization."""
+    model = keras.Sequential([
+        keras.layers.Input(shape=(input_dim,)),
+        keras.layers.Dense(256, activation="relu"),
+        keras.layers.BatchNormalization(),
+        keras.layers.Dropout(0.4),
+        keras.layers.Dense(128, activation="relu"),
+        keras.layers.BatchNormalization(),
+        keras.layers.Dropout(0.3),
+        keras.layers.Dense(64, activation="relu"),
+        keras.layers.BatchNormalization(),
+        keras.layers.Dropout(0.2),
+        keras.layers.Dense(32, activation="relu"),
+        keras.layers.Dropout(0.1),
+        keras.layers.Dense(1, activation="sigmoid"),
+    ])
 
-    Use the shared pipeline:
-        from pipelines.data_pipeline import load_processed_data
-        df = load_processed_data()
-    """
-    # TODO: Load your preprocessed dataset
-    raise NotImplementedError
-
-
-def preprocess_features(df):
-    """Prepare features for neural network training.
-
-    DNN-specific considerations:
-    - Scale all features to [0,1] or standardize (mean=0, std=1)
-    - One-hot encode categoricals (or use embedding layers)
-    - Convert to numpy arrays or tf.data.Dataset
-    """
-    # TODO: Prepare your feature matrix X and target y
-    raise NotImplementedError
-
-
-def build_model(input_dim, num_classes):
-    """Define your neural network architecture.
-
-    Example:
-        import tensorflow as tf
-
-        model = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, activation='relu', input_shape=(input_dim,)),
-            tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Dense(num_classes, activation='softmax'),
-        ])
-        model.compile(
-            optimizer='adam',
-            loss='sparse_categorical_crossentropy',
-            metrics=['accuracy'],
-        )
-        return model
-
-    IMPORTANT: For class imbalance, use class_weight parameter in model.fit()
-    or use a weighted loss function.
-    """
-    # TODO: Build your neural network
-    raise NotImplementedError
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss="binary_crossentropy",
+        metrics=["accuracy", keras.metrics.AUC(name="auc")],
+    )
+    return model
 
 
 def train_model(model, X_train, y_train, X_val, y_val):
-    """Train the model with early stopping.
+    """Train with early stopping and class weights."""
+    # Class weights for imbalance
+    n_neg = np.sum(y_train == 0)
+    n_pos = np.sum(y_train == 1)
+    total = n_neg + n_pos
+    class_weight = {
+        0: total / (2 * n_neg),
+        1: total / (2 * n_pos),
+    }
 
-    Example:
-        from tensorflow.keras.callbacks import EarlyStopping
+    callbacks = [
+        keras.callbacks.EarlyStopping(
+            monitor="val_auc", patience=10, mode="max",
+            restore_best_weights=True, verbose=1,
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=5,
+            min_lr=1e-6, verbose=1,
+        ),
+    ]
 
-        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-        history = model.fit(
-            X_train, y_train,
-            validation_data=(X_val, y_val),
-            epochs=100,
-            batch_size=32,
-            callbacks=[early_stop],
-            class_weight=class_weights,  # Handle imbalance!
-        )
-    """
-    # TODO: Train your model
-    raise NotImplementedError
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_val, y_val),
+        epochs=100,
+        batch_size=256,
+        class_weight=class_weight,
+        callbacks=callbacks,
+        verbose=1,
+    )
+    return history
 
 
 def evaluate_model(model, X_val, y_val):
-    """Evaluate and compare against Model 1.
+    """Evaluate and print metrics."""
+    y_proba = model.predict(X_val, verbose=0).flatten()
+    y_pred = (y_proba >= 0.5).astype(int)
 
-    Must include:
-    - Classification report
-    - Weighted F1 score
-    - Training curves (loss and accuracy over epochs)
-    - Comparison table: Model 1 vs Model 2 metrics
-    """
-    # TODO: Print evaluation metrics
-    raise NotImplementedError
+    print("\n" + "=" * 60)
+    print("MODEL 2 EVALUATION — DNN Readmission Prediction")
+    print("=" * 60)
+    print("\nClassification Report:")
+    print(classification_report(y_val, y_pred, target_names=["No Readmit", "Readmit"]))
+
+    auc = roc_auc_score(y_val, y_proba)
+    f1 = f1_score(y_val, y_pred, average="weighted")
+    print(f"AUC-ROC: {auc:.4f}")
+    print(f"Weighted F1: {f1:.4f}")
+    print(f"Confusion Matrix:\n{confusion_matrix(y_val, y_pred)}")
+
+    return {"auc": auc, "f1": f1}
 
 
-def save_model(model):
-    """Save the trained model to saved_model/.
+def plot_training_curves(history):
+    """Save training curves."""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    Example:
-        SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        model.save(SAVED_MODEL_DIR / "model.keras")
-    """
-    # TODO: Save your model
-    raise NotImplementedError
+    # Loss
+    axes[0].plot(history.history["loss"], label="Train")
+    axes[0].plot(history.history["val_loss"], label="Val")
+    axes[0].set_title("Loss")
+    axes[0].legend()
+
+    # Accuracy
+    axes[1].plot(history.history["accuracy"], label="Train")
+    axes[1].plot(history.history["val_accuracy"], label="Val")
+    axes[1].set_title("Accuracy")
+    axes[1].legend()
+
+    # AUC
+    axes[2].plot(history.history["auc"], label="Train")
+    axes[2].plot(history.history["val_auc"], label="Val")
+    axes[2].set_title("AUC")
+    axes[2].legend()
+
+    plt.tight_layout()
+    plt.savefig(SAVED_MODEL_DIR / "training_curves.png", dpi=150, bbox_inches="tight")
+    plt.close()
+    print("Training curves saved.")
 
 
 def main():
-    # 1. Load data
-    df = load_data()
+    print("Loading and preprocessing encounter data...")
+    X_train, X_val, y_train, y_val, preprocessor, feature_cols, df = \
+        prepare_encounter_data()
 
-    # 2. Preprocess features
-    # X_train, X_val, y_train, y_val = preprocess_features(df)
+    print(f"Training set: {X_train.shape[0]} samples, {X_train.shape[1]} features")
+    print(f"Validation set: {X_val.shape[0]} samples")
 
-    # 3. Build model
-    # model = build_model(input_dim=X_train.shape[1], num_classes=4)
+    # Build model
+    model = build_model(input_dim=X_train.shape[1])
+    model.summary()
 
-    # 4. Train
-    # train_model(model, X_train, y_train, X_val, y_val)
+    # Train
+    print("\nTraining DNN model...")
+    history = train_model(model, X_train, y_train, X_val, y_val)
 
-    # 5. Evaluate and compare to Model 1
-    # evaluate_model(model, X_val, y_val)
+    # Evaluate
+    metrics = evaluate_model(model, X_val, y_val)
 
-    # 6. Save
-    # save_model(model)
+    # Plot training curves
+    SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    plot_training_curves(history)
 
+    # Compare with Model 1 if available
+    m1_metrics_path = PROJECT_ROOT / "models" / "model1_traditional_ml" / "saved_model" / "metrics.joblib"
+    if m1_metrics_path.exists():
+        m1_metrics = joblib.load(m1_metrics_path)
+        print("\n" + "=" * 60)
+        print("MODEL COMPARISON: Model 1 (XGBoost) vs Model 2 (DNN)")
+        print("=" * 60)
+        print(f"  {'Metric':<20} {'XGBoost':>10} {'DNN':>10}")
+        print(f"  {'AUC-ROC':<20} {m1_metrics['auc']:>10.4f} {metrics['auc']:>10.4f}")
+        print(f"  {'Weighted F1':<20} {m1_metrics['f1']:>10.4f} {metrics['f1']:>10.4f}")
+
+    # Save model
+    model.save(SAVED_MODEL_DIR / "model.keras")
+    joblib.dump(preprocessor, SAVED_MODEL_DIR / "preprocessor.joblib")
+    joblib.dump(feature_cols, SAVED_MODEL_DIR / "feature_cols.joblib")
+    joblib.dump(metrics, SAVED_MODEL_DIR / "metrics.joblib")
+    print(f"\nModel saved to {SAVED_MODEL_DIR}")
     print("Training complete!")
 
 

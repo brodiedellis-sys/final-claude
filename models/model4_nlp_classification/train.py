@@ -1,135 +1,138 @@
 #!/usr/bin/env python3
 """
-Model 4: NLP Classification — Training Script
-===============================================
-Train a text classification model on your scenario's text data.
+Model 4: NLP Classification — Drug Review Effectiveness
+=========================================================
+Classify patient drug reviews into 3 effectiveness categories:
+"Highly Effective", "Somewhat Effective", "Ineffective"
 
-Approaches (pick one):
-- TF-IDF + traditional classifier (simplest, often surprisingly good)
-- LSTM / GRU neural network
-- Fine-tuned transformer (BERT, DistilBERT)
-
-IMPORTANT: Save your vectorizer/tokenizer alongside the model — you'll need
-the same text preprocessing at prediction time.
+Uses TF-IDF + Logistic Regression.
 """
+import sys
 from pathlib import Path
 
-PROCESSED_DATA = Path("data/processed/")
-SAVED_MODEL_DIR = Path("models/model4_nlp_classification/saved_model/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
+import numpy as np
+import joblib
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-def load_data():
-    """Load text data from data/processed/.
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import (
+    classification_report, confusion_matrix, f1_score, accuracy_score
+)
+from pipelines.data_pipeline import prepare_review_data
 
-    Use the shared pipeline:
-        from pipelines.data_pipeline import load_processed_data
-        df = load_processed_data()
-    """
-    # TODO: Load your text dataset
-    raise NotImplementedError
-
-
-def preprocess_text(texts):
-    """Clean and prepare text for modeling.
-
-    Common steps:
-    - Lowercase
-    - Remove special characters, HTML tags
-    - Handle abbreviations and slang
-    - Tokenize
-    - Remove stopwords (optional — sometimes they help)
-
-    IMPORTANT: Apply the SAME preprocessing at prediction time.
-    """
-    # TODO: Clean your text data
-    raise NotImplementedError
-
-
-def vectorize_text(texts):
-    """Convert text to numerical features.
-
-    Option 1 — TF-IDF (simplest):
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        vectorizer = TfidfVectorizer(max_features=10000, ngram_range=(1, 2))
-        X = vectorizer.fit_transform(texts)
-        # Save vectorizer! You need it at prediction time.
-        joblib.dump(vectorizer, SAVED_MODEL_DIR / "vectorizer.joblib")
-
-    Option 2 — Embeddings (for neural network approaches):
-        from tensorflow.keras.preprocessing.text import Tokenizer
-        tokenizer = Tokenizer(num_words=10000)
-        tokenizer.fit_on_texts(texts)
-    """
-    # TODO: Vectorize your text
-    raise NotImplementedError
+SAVED_MODEL_DIR = PROJECT_ROOT / "models" / "model4_nlp_classification" / "saved_model"
 
 
 def train_model(X_train, y_train):
-    """Train your text classifier.
-
-    TF-IDF approach:
-        from sklearn.linear_model import LogisticRegression
-        model = LogisticRegression(class_weight='balanced', max_iter=1000)
-        model.fit(X_train, y_train)
-
-    Neural network approach:
-        import tensorflow as tf
-        model = tf.keras.Sequential([...])
-    """
-    # TODO: Train your model
-    raise NotImplementedError
+    """Train LinearSVC (typically best for text classification)."""
+    # LinearSVC is faster and often better than LogisticRegression for text
+    base_model = LinearSVC(
+        C=0.5,
+        class_weight="balanced",
+        max_iter=2000,
+        random_state=42,
+    )
+    # Wrap in CalibratedClassifierCV to get probability estimates
+    model = CalibratedClassifierCV(base_model, cv=3)
+    model.fit(X_train, y_train)
+    return model
 
 
 def evaluate_model(model, X_val, y_val):
-    """Evaluate NLP model performance.
+    """Evaluate NLP model."""
+    y_pred = model.predict(X_val)
+    y_proba = model.predict_proba(X_val)
 
-    Must include:
-    - Classification report per category
-    - Weighted F1 score
-    - Confusion matrix
-    - Example predictions with actual text
-    """
-    # TODO: Evaluate your model
-    raise NotImplementedError
+    print("\n" + "=" * 60)
+    print("MODEL 4 EVALUATION — NLP Drug Review Classification")
+    print("=" * 60)
+    print("\nClassification Report:")
+    print(classification_report(y_val, y_pred))
+
+    accuracy = accuracy_score(y_val, y_pred)
+    f1 = f1_score(y_val, y_pred, average="weighted")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Weighted F1: {f1:.4f}")
+    print(f"Confusion Matrix:\n{confusion_matrix(y_val, y_pred)}")
+
+    return {"accuracy": accuracy, "f1": f1}
 
 
-def save_model(model):
-    """Save model AND vectorizer/tokenizer.
+def analyze_key_phrases(vectorizer, model):
+    """Extract key phrases for each effectiveness class."""
+    feature_names = vectorizer.get_feature_names_out()
 
-    IMPORTANT: You must save both the model and the text preprocessor.
+    # Get the underlying model coefficients
+    base_model = model
+    if hasattr(model, "calibrated_classifiers_"):
+        base_model = model.calibrated_classifiers_[0].estimator
+    if not hasattr(base_model, "coef_"):
+        print("\n--- Key phrase analysis skipped (no coefficients) ---")
+        return
 
-    Example:
-        import joblib
-        SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, SAVED_MODEL_DIR / "model.joblib")
-        joblib.dump(vectorizer, SAVED_MODEL_DIR / "vectorizer.joblib")
-    """
-    # TODO: Save your model and vectorizer
-    raise NotImplementedError
+    classes = model.classes_ if hasattr(model, "classes_") else base_model.classes_
+
+    print("\n--- Key Phrases by Effectiveness Class ---")
+    for i, cls in enumerate(classes):
+        coef = base_model.coef_[i]
+        top_idx = np.argsort(coef)[-15:][::-1]
+        bottom_idx = np.argsort(coef)[:15]
+        top_phrases = [feature_names[j] for j in top_idx]
+        neg_phrases = [feature_names[j] for j in bottom_idx]
+        print(f"\n{cls}:")
+        print(f"  Top indicators: {', '.join(top_phrases[:10])}")
+        print(f"  Negative indicators: {', '.join(neg_phrases[:10])}")
 
 
 def main():
-    # 1. Load data
-    df = load_data()
+    print("Loading and preprocessing drug review data...")
+    texts_train, texts_val, y_train, y_val, df = prepare_review_data()
 
-    # 2. Preprocess text
-    # texts = preprocess_text(df["text_column"])
+    print(f"Training: {len(texts_train)} reviews")
+    print(f"Validation: {len(texts_val)} reviews")
+    print(f"Class distribution (train):")
+    unique, counts = np.unique(y_train, return_counts=True)
+    for cls, cnt in zip(unique, counts):
+        print(f"  {cls}: {cnt} ({cnt / len(y_train) * 100:.1f}%)")
 
-    # 3. Vectorize
-    # X = vectorize_text(texts)
+    # Vectorize text
+    print("\nVectorizing text with TF-IDF...")
+    vectorizer = TfidfVectorizer(
+        max_features=50000,
+        ngram_range=(1, 2),
+        sublinear_tf=True,
+        min_df=3,
+        max_df=0.95,
+        strip_accents="unicode",
+    )
+    X_train = vectorizer.fit_transform(texts_train)
+    X_val = vectorizer.transform(texts_val)
+    print(f"TF-IDF features: {X_train.shape[1]}")
 
-    # 4. Split (use stratified split for imbalanced classes)
-    # X_train, X_val, y_train, y_val = train_test_split(X, y, stratify=y)
+    # Train
+    print("\nTraining Logistic Regression...")
+    model = train_model(X_train, y_train)
 
-    # 5. Train
-    # model = train_model(X_train, y_train)
+    # Evaluate
+    metrics = evaluate_model(model, X_val, y_val)
 
-    # 6. Evaluate
-    # evaluate_model(model, X_val, y_val)
+    # Key phrase analysis
+    analyze_key_phrases(vectorizer, model)
 
-    # 7. Save model + vectorizer
-    # save_model(model)
-
+    # Save
+    SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, SAVED_MODEL_DIR / "model.joblib")
+    joblib.dump(vectorizer, SAVED_MODEL_DIR / "vectorizer.joblib")
+    joblib.dump(metrics, SAVED_MODEL_DIR / "metrics.joblib")
+    print(f"\nModel saved to {SAVED_MODEL_DIR}")
     print("Training complete!")
 
 

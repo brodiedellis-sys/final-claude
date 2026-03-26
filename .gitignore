@@ -1,30 +1,9 @@
 # Data files (too large for git)
-data/raw/*.csv
-data/raw/*.json
-data/raw/*.parquet
-data/processed/*.csv
-data/processed/*.json
-data/processed/*.parquet
-*.zip
-*.tar.gz
-
-# Image datasets
-data/raw/images/
-data/processed/images/
-
-# Model weights and artifacts
-models/*/saved_model/*.joblib
-models/*/saved_model/*.pkl
-models/*/saved_model/*.h5
-models/*/saved_model/*.keras
-models/*/saved_model/*.safetensors
-models/*/saved_model/*.bin
-models/*/saved_model/*.onnx
+data/raw/
+data/processed/
 
 # Test data (provided by instructor)
-test_data/*.csv
-test_data/*.json
-test_data/images/
+test_data/
 
 # Python
 __pycache__/
@@ -44,7 +23,6 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb_checkpoints
 
 # IDE
 .vscode/
@@ -57,3 +35,6 @@ env/
 *.log
 wandb/
 runs/
+
+# NOTE: saved_model/ files are NOT ignored — they must be in the repo
+# for Streamlit Cloud deployment and bulk_test.py to work.

@@ -1,120 +1,164 @@
 #!/usr/bin/env python3
 """
-Model 1: Traditional ML — Training Script
-===========================================
-Train a classical ML model (XGBoost, Random Forest, etc.) on your scenario's
-tabular data.
-
-IMPORTANT: This model must be interpretable. Include SHAP or feature importance
-analysis so stakeholders can understand WHY the model makes its predictions.
+Model 1: Traditional ML — XGBoost Readmission Prediction
+=========================================================
+Binary classification: will this patient be readmitted?
+Uses XGBoost with comprehensive feature engineering and SHAP analysis.
 """
+import sys
 from pathlib import Path
 
-PROCESSED_DATA = Path("data/processed/")
-SAVED_MODEL_DIR = Path("models/model1_traditional_ml/saved_model/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import joblib
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from xgboost import XGBClassifier
+from sklearn.metrics import (
+    classification_report, confusion_matrix, roc_auc_score, f1_score
+)
+from pipelines.data_pipeline import prepare_encounter_data
+
+SAVED_MODEL_DIR = PROJECT_ROOT / "models" / "model1_traditional_ml" / "saved_model"
 
 
-def load_data():
-    """Load preprocessed data from data/processed/.
+def train_model(X_train, y_train, X_val, y_val):
+    """Train XGBoost with tuned hyperparameters."""
+    n_neg = np.sum(y_train == 0)
+    n_pos = np.sum(y_train == 1)
+    scale_pos = n_neg / max(n_pos, 1)
 
-    Use the shared pipeline:
-        from pipelines.data_pipeline import load_processed_data
-        df = load_processed_data()
-    """
-    # TODO: Load your preprocessed dataset
-    raise NotImplementedError
+    model = XGBClassifier(
+        n_estimators=1500,
+        max_depth=5,
+        learning_rate=0.02,
+        subsample=0.75,
+        colsample_bytree=0.75,
+        min_child_weight=8,
+        gamma=0.15,
+        reg_alpha=0.05,
+        reg_lambda=1.2,
+        scale_pos_weight=scale_pos,
+        eval_metric="auc",
+        random_state=42,
+        n_jobs=-1,
+        early_stopping_rounds=80,
+    )
 
-
-def preprocess_features(df):
-    """Select and prepare features for training.
-
-    Consider:
-    - Feature selection (drop leaky or irrelevant columns)
-    - Encoding categorical variables
-    - Scaling numerical features
-    - Handling missing values
-    """
-    # TODO: Prepare your feature matrix X and target y
-    raise NotImplementedError
-
-
-def train_model(X_train, y_train):
-    """Train your traditional ML model.
-
-    Recommended algorithms:
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from xgboost import XGBClassifier
-
-    IMPORTANT: Handle class imbalance!
-        model = RandomForestClassifier(class_weight='balanced')
-    """
-    # TODO: Train your model
-    raise NotImplementedError
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)],
+        verbose=100,
+    )
+    return model
 
 
 def evaluate_model(model, X_val, y_val):
-    """Evaluate model performance on validation data.
+    """Evaluate and print metrics."""
+    y_pred = model.predict(X_val)
+    y_proba = model.predict_proba(X_val)[:, 1]
 
-    Must include:
-    - Classification report (precision, recall, F1 per class)
-    - Confusion matrix
-    - Weighted F1 score (primary metric for imbalanced data)
-    - AUC-ROC (for binary classification scenarios)
-    """
-    # TODO: Print evaluation metrics
-    raise NotImplementedError
+    print("\n" + "=" * 60)
+    print("MODEL 1 EVALUATION — XGBoost Readmission Prediction")
+    print("=" * 60)
+    print("\nClassification Report:")
+    print(classification_report(y_val, y_pred, target_names=["No Readmit", "Readmit"]))
+
+    auc = roc_auc_score(y_val, y_proba)
+    f1 = f1_score(y_val, y_pred, average="weighted")
+    print(f"AUC-ROC: {auc:.4f}")
+    print(f"Weighted F1: {f1:.4f}")
+    print(f"Confusion Matrix:\n{confusion_matrix(y_val, y_pred)}")
+
+    return {"auc": auc, "f1": f1}
 
 
-def explain_model(model, X_val):
-    """Generate SHAP or feature importance analysis.
-
-    This is REQUIRED — your model must be interpretable.
-
-    Option 1 — SHAP (recommended):
+def explain_model(model, X_val, feature_names=None):
+    """SHAP feature importance analysis."""
+    try:
         import shap
+        print("\nGenerating SHAP analysis...")
         explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_val)
-        shap.summary_plot(shap_values, X_val)
 
-    Option 2 — Built-in feature importance:
-        importances = model.feature_importances_
-        # Plot top 15 features
-    """
-    # TODO: Generate explainability analysis
-    raise NotImplementedError
+        sample_size = min(1000, X_val.shape[0])
+        X_sample = X_val[:sample_size]
+        shap_values = explainer.shap_values(X_sample)
 
+        plt.figure(figsize=(12, 8))
+        shap.summary_plot(
+            shap_values, X_sample,
+            feature_names=feature_names,
+            show=False, max_display=20,
+        )
+        plt.tight_layout()
+        plt.savefig(SAVED_MODEL_DIR / "shap_summary.png", dpi=150, bbox_inches="tight")
+        plt.close()
 
-def save_model(model):
-    """Save the trained model to saved_model/.
+        plt.figure(figsize=(12, 8))
+        shap.summary_plot(
+            shap_values, X_sample,
+            feature_names=feature_names,
+            plot_type="bar",
+            show=False, max_display=20,
+        )
+        plt.tight_layout()
+        plt.savefig(SAVED_MODEL_DIR / "shap_importance.png", dpi=150, bbox_inches="tight")
+        plt.close()
+        print("SHAP plots saved.")
 
-    Example:
-        import joblib
-        SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, SAVED_MODEL_DIR / "model.joblib")
-    """
-    # TODO: Save your model
-    raise NotImplementedError
+    except Exception as e:
+        print(f"SHAP analysis note: {e}")
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            if feature_names and len(feature_names) == len(importances):
+                indices = np.argsort(importances)[-20:]
+                plt.figure(figsize=(10, 8))
+                plt.barh(range(len(indices)), importances[indices])
+                plt.yticks(range(len(indices)),
+                           [feature_names[i] for i in indices])
+                plt.title("Top 20 Feature Importances")
+                plt.tight_layout()
+                plt.savefig(SAVED_MODEL_DIR / "feature_importance.png",
+                            dpi=150, bbox_inches="tight")
+                plt.close()
 
 
 def main():
-    # 1. Load data
-    df = load_data()
+    print("Loading and preprocessing encounter data...")
+    X_train, X_val, y_train, y_val, preprocessor, feature_cols, df = \
+        prepare_encounter_data()
 
-    # 2. Preprocess features
-    # X_train, X_val, y_train, y_val = preprocess_features(df)
+    print(f"Training set: {X_train.shape[0]} samples")
+    print(f"Validation set: {X_val.shape[0]} samples")
+    print(f"Feature dimensions: {X_train.shape[1]}")
+    print(f"Positive class ratio: {y_train.mean():.3f}")
 
-    # 3. Train model
-    # model = train_model(X_train, y_train)
+    # Train
+    print("\nTraining XGBoost model...")
+    model = train_model(X_train, y_train, X_val, y_val)
 
-    # 4. Evaluate
-    # evaluate_model(model, X_val, y_val)
+    # Evaluate
+    metrics = evaluate_model(model, X_val, y_val)
 
-    # 5. Explain — REQUIRED
-    # explain_model(model, X_val)
+    # Get feature names
+    try:
+        feature_names = preprocessor.get_feature_names_out().tolist()
+    except Exception:
+        feature_names = None
 
-    # 6. Save
-    # save_model(model)
+    # Explain
+    SAVED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    explain_model(model, X_val, feature_names)
 
+    # Save
+    joblib.dump(model, SAVED_MODEL_DIR / "model.joblib")
+    joblib.dump(preprocessor, SAVED_MODEL_DIR / "preprocessor.joblib")
+    joblib.dump(feature_cols, SAVED_MODEL_DIR / "feature_cols.joblib")
+    joblib.dump(metrics, SAVED_MODEL_DIR / "metrics.joblib")
+    print(f"\nModel saved to {SAVED_MODEL_DIR}")
     print("Training complete!")
 
 

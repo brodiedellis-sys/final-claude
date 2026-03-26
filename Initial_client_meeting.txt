@@ -1,0 +1,486 @@
+**Date:** March 18, 2026
+**Attendees:**
+
+- MedInsight Healthcare Leadership Team
+- AI Consulting Group (1 of 2 finalists)
+
+**You are competing against another world-class AI consulting firm for a landmark contract worth $3.5M initially, with $15M+ in guaranteed follow-on work.** As the industry leader, we only partner with the best. The winning team will become our exclusive AI innovation partner and help shape the future of diabetes care globally.
+
+---
+
+## About MedInsight Healthcare
+
+MedInsight is the nation's leading diabetes-focused healthcare analytics company, recognized as the gold standard for comprehensive diabetes care management. Founded in 2015 by endocrinologists and data scientists from Mayo Clinic, we've built the most sophisticated diabetes care platform in the United States. We partner exclusively with hospitals committed to excellence in diabetes care, currently serving 47 premier medical centers across the midwest.
+
+While diabetes is our core focus, our partner hospitals treat the full spectrum of chronic conditions. Our patients often have complex comorbidities — hypertension, heart disease, kidney disease, depression — and take medications for many conditions beyond diabetes. Our data reflects this clinical reality: we track outcomes across all medications our patients use, not just diabetes drugs.
+
+### Our Diabetes Leadership Position
+
+- **Market Share:** #1 diabetes analytics platform (32% market share)
+- **Partner Hospitals:** 47 premier diabetes centers of excellence
+- **Active Diabetes Patients:** 180,000+ (largest cohort in North America)
+- **Annual Healthcare Cost Savings:** $45M in diabetes-related costs
+- **Clinical Outcomes:** 18% reduction in diabetic readmissions (industry best)
+- **Proprietary Tools:** 12 FDA-cleared diabetes decision support systems
+- **Research Publications:** 47 peer-reviewed papers on diabetes care
+- **Awards:** 2025 HIMSS Davies Award for Excellence in Diabetes Management
+
+---
+
+## The Challenge: Advancing Diabetes Care Excellence
+
+As the industry leader, we're not competing with others — we're setting the standard. Our challenge is to push the boundaries of what's possible in diabetes care and maintain our position as the premier solution.
+
+### Current Healthcare Landscape
+
+- **Readmission rate:** 22% for diabetic patients
+- **Average cost per readmission:** $15,000
+- **Medication non-adherence:** 40% of patients
+- **Preventable complications:** 35% of hospital admissions
+- **Diabetic retinopathy:** Leading cause of blindness in working-age adults
+- **Annual eye exam compliance:** Only 55% of diabetic patients
+
+### Our Pain Points
+
+1. **Readmission Prediction**
+    - Current model accuracy: 68% (unacceptable for clinical use)
+    - Clinicians don't trust our risk scores
+    - Missing early intervention opportunities
+2. **Diabetic Complications Screening**
+    - 40% of diabetic patients develop retinopathy
+    - Manual screening is time-consuming and error-prone
+    - Shortage of ophthalmologists (6-month wait times)
+    - Late detection leads to irreversible vision loss
+3. **Medication Optimization**
+    - Trial-and-error prescribing leads to poor outcomes
+    - Drug interaction risks not well understood
+    - Patient response to medications highly variable
+4. **Resource Allocation**
+    - ICU beds utilized inefficiently
+    - Specialist consultations not prioritized effectively
+    - Length of stay 2.3 days longer than necessary
+
+---
+
+## Available Data Assets
+
+> **⚠️ IMPORTANT: Read the Preprocessing Hints File**
+The `preprocessing_hints.py` file contains data preparation guidance that will significantly impact your model performance. Review it carefully before starting any modeling work.
+> 
+
+> **⚠️ IMPORTANT — Patient ID Mismatch Between Datasets:** The medication feedback data (`patient_medication_feedback.csv`) comes from a **different patient system** than the encounter data (`patient_encounters_2023.csv`). The patient IDs do **NOT** match between these two datasets. **Do not attempt to join them on patient ID.** Plan your models accordingly — the encounter data and the medication review data must be treated as completely separate patient populations.
+> 
+
+### 1. Hospital Encounter Database
+
+*File: patient_encounters_2023.csv (101,767 patient encounters)*
+
+**Comprehensive Patient Records Including:**
+
+**Demographics:**
+
+- Race, gender, age brackets
+- Weight categories
+
+**Admission Details:**
+
+- Admission type (Emergency, Urgent, Elective, etc.)
+- Admission source (Physician referral, ER, Transfer, etc.)
+- Discharge disposition (Home, SNF, Hospice, etc.)
+- Length of stay (time_in_hospital)
+
+**Clinical Metrics:**
+
+- Number of lab procedures
+- Number of procedures
+- Number of medications
+- Outpatient visits in prior year
+- Emergency visits in prior year
+- Inpatient admissions in prior year
+
+**Diagnostic Information:**
+
+- Primary diagnosis (diag_1)
+- Secondary diagnoses (diag_2, diag_3)
+- Total number of diagnoses
+- ICD-9 coded conditions
+
+**Diabetes-Specific Metrics:**
+
+- HbA1c test results, glucose serum levels, and multiple diabetes medication columns
+- **Important:** Some test result values of "None" mean the test was **not performed** — this is itself a meaningful clinical signal
+- Multiple diabetes medication columns tracking prescription and dosage changes
+- Insulin usage patterns and medication change flags
+
+**Outcome Variable:**
+
+- Readmission status (<30 days, >30 days, or No readmission)
+
+**Dataset Note:** This data is pre-filtered to substantive inpatient stays with a diabetes diagnosis. It does not represent all diabetic patients.
+
+### 2. Clinical Coding Reference
+
+*File: clinical_codes_reference.csv (reference codes)*
+
+**This is a lookup/join table for the encounter data.** The patient encounters dataset uses numeric codes for several categorical fields. This reference file maps those codes to their human-readable descriptions (admission types, discharge dispositions, admission sources).
+
+**You will need to join this reference table** to your encounter data to understand what these coded fields mean. Without this join, several columns are just meaningless integers. Pay close attention to discharge dispositions — some have important implications for your readmission model.
+
+### 3. Patient Medication Feedback Database
+
+*File: patient_medication_feedback.csv (~180,000 patient drug reviews)*
+
+**Patient-Reported Drug Reviews:**
+
+- Patient ID (separate from encounter data)
+- Drug name, condition treated
+- Review text (detailed patient narratives about their medication experience)
+- Effectiveness rating and numeric rating
+- Date of review
+
+**For your NLP model:** Classify patient reviews into the correct effectiveness category using the `review_text` field. This is real patient language — informal, emotional, sometimes contradictory. Explore the effectiveness categories and consider whether simplification makes sense.
+
+**Note:** This dataset covers medications across all conditions our patients are treated for, not just diabetes drugs. This reflects the reality that our diabetic patient population has complex comorbidities.
+
+### 4. Diabetic Retinopathy Screening Images
+
+*Directory: retinal_scan_images/ (retinal images)Labels: retinal_labels.csv (image labels)*
+
+**Medical Imaging Dataset:**
+
+- Fundus photography from diabetic patients
+- PNG format
+- Collected during routine diabetic eye exams
+- Mix of normal and pathological cases
+- Severity grades (0-4 scale) ranging from no retinopathy to proliferative retinopathy
+
+**Important — Image/Label Mismatch:** The labels file contains more entries than there are actual image files on disk. You must match labels to existing images and filter accordingly. This is a common real-world data quality issue.
+
+**Dataset Context:** This is a small medical imaging dataset with significant class imbalance across severity grades. Consider how to handle this for training. For clinical decision-making, think about what classification split is most useful for screening purposes.
+
+---
+
+## What We Need From You
+
+### 5 Required AI Models
+
+### Model 1: Readmission Risk — Traditional ML
+
+- **Binary classification:** will this patient be readmitted (yes/no)?
+- **Important:** The raw `readmitted` column has 3 values (`<30`, `>30`, `NO`). You must create a binary target: readmitted = 1 (both `<30` AND `>30`), not readmitted = 0 (`NO`). See `preprocessing_hints.py`.
+- Use classical ML algorithms (XGBoost, Random Forest, Logistic Regression, etc.)
+- Must be interpretable — clinicians need to understand WHY a patient is flagged
+- **Minimum Benchmark:** AUC-ROC > 0.70
+- **Stretch Goal:** AUC-ROC > 0.80
+- **Required:** SHAP or feature importance analysis
+
+### Model 2: Readmission Risk — Deep Neural Network
+
+- Same binary readmission prediction task as Model 1, but using a deep learning approach
+- Build a neural network (TensorFlow/Keras) on the tabular encounter data
+- Compare performance against your traditional ML model
+- **Minimum Benchmark:** AUC-ROC > 0.70
+- **Stretch Goal:** AUC-ROC > 0.80
+- **Required:** Show how DNN performance compares to traditional ML and explain the trade-offs
+
+### Model 3: Diabetic Retinopathy Detection — CNN
+
+- **Binary classification:** Does this patient have diabetic retinopathy (DR vs. No DR)?
+- **Important:** The raw labels have 5 severity grades. You must convert to binary: No DR vs. Has DR. See `preprocessing_hints.py`.
+- Build or fine-tune a convolutional neural network
+- **Minimum Benchmark:** Overall accuracy > 70%, Sensitivity for DR detection > 80%
+- **Stretch Goal:** Accuracy > 85%, Sensitivity > 85%
+- **Also valued:** Grad-CAM or other interpretability visualizations
+
+### Model 4: Patient Drug Review Classification — NLP
+
+- **Classify patient drug reviews into 3 effectiveness categories:** "Highly Effective", "Somewhat Effective", and "Ineffective". See `preprocessing_hints.py` for the mapping from the raw 5-class data.
+- Use NLP techniques (TF-IDF + classifier, word embeddings, or transformers)
+- Handle messy, real-world patient text (typos, slang, medical jargon, emotional language)
+- **Minimum Benchmark:** Accuracy > 70%, weighted F1 > 0.65
+- **Stretch Goal:** Accuracy > 82%, weighted F1 > 0.78
+- **Also valued:** Key phrase extraction, side effect pattern identification
+
+### Model 5: Clinical Innovation — Your Choice
+
+- Identify a clinical problem in the data that we haven't asked you to solve
+- Build a model that addresses a genuine clinical need
+- **You must use the data we've provided** — do not bring in external datasets. The goal is to show us what's possible with what we already have.
+- Ideas to explore: ICU transfer prediction, length of stay optimization, diabetes subtype clustering, medication interaction risk scoring
+- Think creatively about how to leverage our data in ways we haven't considered — could you use agents, RAG, or other innovative techniques to extract more value?
+- **Must include:** Clear clinical justification, defined success metric, ROI estimate
+- **We want you to surprise us.** The winning team won't just build what we asked for — they'll identify problems we didn't know we could solve.
+
+---
+
+## Project Timeline (~7 Weeks)
+
+### Phase 1: Data Foundation & Discovery (Weeks 1-2)
+
+**Week 1 — Data Audit & Exploration**
+
+- Comprehensive data quality assessment
+- Initial EDA and pattern discovery
+- Understand the data challenges (missing values, encodings, class distributions)
+
+**Week 2 — Feature Engineering & Baselines**
+
+- Build your data pipeline (`pipelines/data_pipeline.py`)
+- Feature engineering across all datasets
+- Establish baseline models for Models 1 & 2
+- Begin image and text preprocessing for Models 3 & 4
+
+### Phase 2: Model Development (Weeks 3-5)
+
+**Week 3 — Core Models**
+
+- Model 1 (Traditional ML): Iterate on algorithms, feature selection, hyperparameter tuning
+- Model 2 (DNN): Build neural network architecture, compare to Model 1
+- Model 3 (CNN): Build/fine-tune image classification model
+- Model 4 (NLP): Build text classification pipeline
+
+**Week 4 — Advanced Models & Integration**
+
+- Model 5 (Innovation): Develop your chosen clinical innovation
+- Begin web app development
+- Start integrating models into the application
+
+**Week 5 — Optimization & Testing**
+
+- Tune all models for best performance
+- Ensure output formats match templates exactly
+- Run bulk test scripts — fix any issues
+- Test on validation data — check for overfitting and data leakage
+
+### Phase 3: Deployment & Presentation (Weeks 6-7)
+
+**Week 6 — Integration & Deployment**
+
+- Complete web application with all 5 models integrated
+- Deploy to hosting platform
+- End-to-end testing
+- Prepare presentation materials
+
+**Week 7 — Presentation Prep & Final Testing**
+
+- Polish presentation deck
+- Practice live demo
+- Prepare for Q&A
+- Final submission and code cleanup
+
+### Sprint Reviews
+
+- **Weekly check-ins** with your instructor (acting as the MedInsight technical lead)
+- **Submit your `weekly-sprint-template.md` via Slack before each check-in** — this is required
+- Come prepared with: progress update, blockers, questions, demo of current state
+- These are working sessions — bring your laptop and be ready to show code
+
+---
+
+## Success Metrics & Clinical KPIs
+
+### Primary Outcomes
+
+**From Required Models:**
+
+- **Readmission Rate:** Reduce from 22% to <18%
+- **Retinopathy Screening Coverage:** Increase from 55% to 90%
+- **Medication Optimization:** 20% reduction in adverse events
+
+### Model Evaluation Framework
+
+**Models are evaluated holistically, not just on accuracy:**
+
+**Clinical Validity (35%)**
+
+- Meets minimum performance benchmarks
+- Clinically meaningful predictions
+- Validated on realistic scenarios
+
+**Safety & Fairness (25%)**
+
+- No harmful biases across patient groups
+- Fail-safe mechanisms for uncertainty
+- Clear limitations documented
+
+**Usability (25%)**
+
+- Interpretable for clinicians (SHAP/LIME/Grad-CAM)
+- Integrates into workflows
+- Response time < 500ms for prediction models
+- Clear confidence indicators
+
+**Impact Potential (15%)**
+
+- Measurable patient benefit
+- Cost-effectiveness analysis
+- Scalability across facilities
+
+**Philosophy:** In healthcare, a slightly less accurate model that clinicians trust and use is infinitely more valuable than a perfect model that sits unused. Focus on adoption, not just accuracy.
+
+---
+
+## How We'll Evaluate You
+
+### Technical Deliverables (45% of grade)
+
+| Component | Points | What We're Looking For |
+| --- | --- | --- |
+| Model 1: Traditional ML | 18 | Performance metrics + interpretability |
+| Model 2: Deep Learning | 18 | DNN architecture + comparison to Model 1 |
+| Model 3: CNN | 18 | Image classification accuracy + handling class imbalance |
+| Model 4: NLP | 18 | Text classification + handling messy text |
+| Model 5: Innovation | 18 | Clinical value + technical quality |
+
+**Critical — How Testing Works:**
+
+Your models will be tested on **completely unseen data** that I hold back. This test data looks exactly like the raw data you downloaded — same columns, same formats, same messiness (e.g., `?` values, `[70-80)` age brackets, missing fields). Your `predict.py` must:
+
+1. **Accept raw data** in the same format as what you downloaded (not pre-cleaned data)
+2. **Apply all preprocessing automatically** — the same cleaning, encoding, and feature engineering you did during training must happen inside your prediction pipeline
+3. **Output predictions** in the exact format specified by the output templates
+
+Think of it this way: I will drop a fresh CSV (or images) into your `test_data/` folder and run `python bulk_test.py --all`. Your code needs to handle everything from raw input to final predictions **without any manual steps**. If your pipeline only works on data you've already cleaned by hand, it will break.
+
+Build your preprocessing as reusable functions in `pipelines/data_pipeline.py` and import them in both your `train.py` and `predict.py`. This is how real production ML works — the same pipeline handles training data and new data.
+
+### Business Deliverables & Presentation (45% of grade)
+
+- Professional slide deck presenting your solution and business case
+- Live demo of your deployed web application
+- Q&A performance — ability to answer technical, business, and strategic questions
+- Clear justification of your decisions and feature prioritization
+- Professional communication and presentation skills
+
+### Collaboration & Process (10% of grade)
+
+- Equal participation and contribution from all team members
+- Effective teamwork and knowledge sharing
+- Professional project management and communication
+- Peer evaluations will influence individual scores
+
+---
+
+## Automatic Deductions
+
+| Issue | Penalty |
+| --- | --- |
+| Missing bulk test scripts | -10 points |
+| Models only in notebooks (no .py files) | -5 points |
+| Missing requirements.txt | -3 points |
+| No documentation / README | -5 points |
+| Code doesn't run | -15 points per model |
+| Hardcoded absolute paths | -2 points |
+| Data leakage detected | -10 points |
+| Overfitting (suspiciously perfect accuracy) | -5 points |
+
+### Bonus Points (max 15)
+
+- Exceptional innovation in Model 5: +5 points
+- Production-ready code quality: +3 points
+- Excellent documentation: +2 points
+- Fairness/bias analysis across demographics: +3 points
+- Model comparison analysis (ML vs DNN depth): +2 points
+
+---
+
+## Evaluation Questions for All Competing Firms
+
+**Each firm will be scored on these responses during the final presentation:**
+
+1. How will you handle missing clinical data in production?
+2. What's your approach to model interpretability for clinicians?
+3. How will you ensure fairness across different patient populations?
+4. What validation strategy will you use for life-critical predictions?
+5. How will you handle the class imbalance in readmission data?
+6. What's your plan for continuous model monitoring post-deployment?
+7. How does your CNN architecture handle varying image quality?
+8. What's your strategy for explaining AI decisions on medical images?
+9. How did your deep learning model compare to your traditional ML model, and why?
+10. **Differentiator Question:** What innovative approach will you bring that your competitors won't?
+
+---
+
+## Data Quality & Integration Notes
+
+**Real-World Data Challenges:**
+
+- Missing values are encoded in ways you may not expect — investigate how nulls are represented
+- Some patients in the encounter data cannot physically be readmitted — think about which discharge dispositions make readmission impossible and exclude them. Use the clinical codes reference table.
+- Retinal image labels are in a separate file that must be matched to actual images on disk
+- Age is stored in a non-numeric format
+- ICD-9 diagnostic codes are worth exploring for feature engineering
+- Medication review text contains typos, abbreviations, and inconsistent formatting
+
+**This messiness is intentional** — real healthcare data is never perfect. Your ability to handle these challenges is part of the evaluation.
+
+**A Note on Patient Cohorts:** The medication feedback data comes from a different patient system than the encounter data. The patient IDs do NOT match between these datasets. Plan your models accordingly — don't try to join them.
+
+---
+
+## Common Pitfalls (Learn from Previous Teams)
+
+**Teams have failed because they:**
+
+- Didn't standardize their output format (columns didn't match, evaluation script failed)
+- Left final code in notebooks instead of `.py` files
+- Built models with high accuracy but poor interpretability
+- Ignored class imbalance and reported misleading metrics
+- Let one team member do all the work (peer evals caught this)
+- Didn't test their bulk_test scripts before submission
+
+**Teams have succeeded because they:**
+
+- Followed the repo template exactly
+- Tested their output format against the templates early
+- Built modular, clean pipelines
+- Compared models thoughtfully (not just "DNN is better")
+- Told a compelling clinical story in their presentation
+- Showed genuine understanding of healthcare workflows
+
+---
+
+## Professional Communication Expectations
+
+As our potential AI partner, we expect consultant-level professionalism:
+
+- **Never criticize our data quality** — we work with real-world clinical data
+- **Frame challenges as opportunities** for innovation and value creation
+- **Speak like a partner, not a vendor** — you're helping us transform healthcare
+- **Remember:** Every "messy" data point represents a real patient's journey
+
+**Language We Expect:**
+
+- "We've identified an opportunity to handle emergency admission patterns"
+- "The variation in data completeness could help us build more robust models"
+- "We can leverage the missing weight data as a predictor of admission urgency"
+
+**Not:**
+
+- "Your data is messy/terrible/incomplete"
+- "This data quality makes our job harder"
+
+---
+
+## Contract Competition Details
+
+- **Initial Contract:** $3.5M (proof of concept with 2 flagship centers)
+- **Guaranteed Follow-on:** $15M+ for full 47-center deployment
+- **Evaluation Period:** ~7 weeks to prove your capabilities
+- **Weekly Milestones:** Sprint reviews each week
+- **Final Presentations:** May 13 & May 14, 2026 (both firms present)
+- **Winner Selection:** May 15, 2026
+- **Strategic Partnership:** 3-year exclusive engagement post-selection
+
+---
+
+## Important Notes
+
+1. **Patient Privacy:** All data has been de-identified per HIPAA Safe Harbor provisions
+2. **Clinical Context:** Your instructor serves as the MedInsight clinical team — ask questions!
+3. **Ethical Considerations:** Models will augment, not replace, clinical judgment
+4. **Real-World Impact:** Your models would directly affect patient care decisions
+
+*"As the recognized leader in diabetes analytics, every innovation we deploy becomes the industry standard. We have a responsibility to our 180,000 patients to deliver nothing less than excellence. Every percentage point improvement in our models saves 500 readmissions and $7.5M annually."* — Dr. Patricia Williams, CMO
+
+---

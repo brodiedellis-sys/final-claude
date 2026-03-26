@@ -2,77 +2,70 @@
 """
 Model 4: NLP Classification — Prediction Script
 =================================================
-Loads your trained model and generates predictions on test data.
-
-Usage: python predict.py
+Loads trained NLP model and generates predictions on raw test data.
 Output: test_data/model4_results.csv
 """
-import pandas as pd
+import sys
 from pathlib import Path
 
-# Paths
-MODEL_PATH = Path("models/model4_nlp_classification/saved_model/")
-TEST_DATA_DIR = Path("test_data/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import pandas as pd
+import joblib
+from pipelines.data_pipeline import (
+    preprocess_reviews_for_prediction, clean_review_text, find_test_csv,
+)
+
+MODEL_DIR = PROJECT_ROOT / "models" / "model4_nlp_classification" / "saved_model"
+TEST_DATA_DIR = PROJECT_ROOT / "test_data"
 OUTPUT_FILE = TEST_DATA_DIR / "model4_results.csv"
 
 
-def load_model():
-    """Load your trained NLP model from saved_model/.
-
-    Typical approaches:
-        # Scikit-learn pipeline with TF-IDF + classifier
-        import joblib
-        model = joblib.load(MODEL_PATH / "model.joblib")
-
-        # Hugging Face transformer
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-
-    Don't forget to load your tokenizer / vectorizer if needed.
-    """
-    # TODO: Load your saved model
-    raise NotImplementedError("Load your trained model here")
-
-
-def preprocess_text(texts):
-    """Apply text preprocessing: lowercasing, tokenization, cleaning, etc."""
-    # TODO: Apply the same preprocessing used during training
-    raise NotImplementedError("Preprocess text here")
-
-
-def predict(model, test_data):
-    """Generate predictions on text data.
-
-    Should return a DataFrame with columns: id, predicted_class, confidence
-    """
-    # TODO: Run your model on the test data
-    raise NotImplementedError("Generate predictions here")
-
-
 def main():
-    # Load model
-    model = load_model()
+    # Load model and vectorizer
+    model = joblib.load(MODEL_DIR / "model.joblib")
+    vectorizer = joblib.load(MODEL_DIR / "vectorizer.joblib")
 
-    # Load test data
-    # TODO: Update this path to match your test data file
-    # test_df = pd.read_csv(TEST_DATA_DIR / "test_data_file.csv")
+    # Find test data
+    test_csv = find_test_csv(
+        TEST_DATA_DIR,
+        expected_columns=["benefitsReview"],
+        name_hint="medication",
+    )
+    raw_df = pd.read_csv(test_csv)
+    print(f"Loaded test data: {test_csv.name} ({len(raw_df)} rows)")
 
     # Preprocess text
-    # processed = preprocess_text(test_df["text_column"])
+    df = preprocess_reviews_for_prediction(raw_df)
+    texts = df["review_text_clean"].values
 
-    # Generate predictions
-    # predictions = predict(model, processed)
+    # Vectorize
+    X = vectorizer.transform(texts)
 
-    # Save results — MUST match output template exactly
-    # results = pd.DataFrame({
-    #     "id": test_df["id"],
-    #     "predicted_class": predicted_classes,
-    #     "confidence": confidence_scores,
-    # })
-    # results.to_csv(OUTPUT_FILE, index=False)
+    # Predict
+    y_pred = model.predict(X)
+    y_proba = model.predict_proba(X)
+    confidence = np.max(y_proba, axis=1)
 
-    print(f"Predictions saved to {OUTPUT_FILE}")
+    # Build output
+    if "Patient ID" in raw_df.columns:
+        id_col = raw_df["Patient ID"].values
+    elif "id" in raw_df.columns:
+        id_col = raw_df["id"].values
+    else:
+        id_col = range(len(raw_df))
+
+    results = pd.DataFrame({
+        "id": id_col,
+        "predicted_class": y_pred,
+        "confidence": np.round(confidence, 4),
+    })
+
+    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    results.to_csv(OUTPUT_FILE, index=False)
+    print(f"Predictions saved to {OUTPUT_FILE} ({len(results)} rows)")
 
 
 if __name__ == "__main__":

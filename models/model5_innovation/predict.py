@@ -1,65 +1,68 @@
 #!/usr/bin/env python3
 """
-Model 5: Innovation — Prediction Script
-=========================================
-Loads your trained model and generates predictions on test data.
-
-Usage: python predict.py
+Model 5: Innovation — LOS Prediction Script
+=============================================
+Loads trained LOS model and generates predictions on raw test data.
 Output: test_data/model5_results.csv
 """
-import pandas as pd
+import sys
 from pathlib import Path
 
-# Paths
-MODEL_PATH = Path("models/model5_innovation/saved_model/")
-TEST_DATA_DIR = Path("test_data/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import pandas as pd
+import joblib
+from pipelines.data_pipeline import (
+    clean_encounters, find_test_csv, preprocess_encounters_for_prediction,
+)
+
+MODEL_DIR = PROJECT_ROOT / "models" / "model5_innovation" / "saved_model"
+TEST_DATA_DIR = PROJECT_ROOT / "test_data"
 OUTPUT_FILE = TEST_DATA_DIR / "model5_results.csv"
 
 
-def load_model():
-    """Load your trained model from saved_model/.
-
-    This is your team's innovation model — use whatever approach you chose.
-    """
-    # TODO: Load your saved model
-    raise NotImplementedError("Load your trained model here")
-
-
-def predict(model, test_data):
-    """Generate predictions on test data.
-
-    Should return a DataFrame with columns:
-        id, prediction, confidence, metric_name, metric_value
-
-    metric_name and metric_value are your custom evaluation metric.
-    For example: metric_name="f1_weighted", metric_value=0.85
-    """
-    # TODO: Run your model on the test data
-    raise NotImplementedError("Generate predictions here")
-
-
 def main():
-    # Load model
-    model = load_model()
+    # Load saved artifacts
+    model = joblib.load(MODEL_DIR / "model.joblib")
+    preprocessor = joblib.load(MODEL_DIR / "preprocessor.joblib")
+    feature_cols = joblib.load(MODEL_DIR / "feature_cols.joblib")
+    label_encoder = joblib.load(MODEL_DIR / "label_encoder.joblib")
+    metrics = joblib.load(MODEL_DIR / "metrics.joblib")
 
-    # Load test data
-    # TODO: Update this path to match your test data file
-    # test_df = pd.read_csv(TEST_DATA_DIR / "test_data_file.csv")
+    # Find test data
+    test_csv = find_test_csv(
+        TEST_DATA_DIR,
+        expected_columns=["encounter_id", "patient_nbr"],
+        name_hint="encounter",
+    )
+    raw_df = pd.read_csv(test_csv)
+    print(f"Loaded test data: {test_csv.name} ({len(raw_df)} rows)")
 
-    # Generate predictions
-    # predictions = predict(model, test_df)
+    # Preprocess (reuse encounter pipeline without filtering)
+    X, df_clean = preprocess_encounters_for_prediction(raw_df, preprocessor, feature_cols)
 
-    # Save results — MUST match output template exactly
-    # results = pd.DataFrame({
-    #     "id": test_df["id"],
-    #     "prediction": predictions,
-    #     "confidence": confidence_scores,
-    #     "metric_name": "your_custom_metric",
-    #     "metric_value": metric_score,
-    # })
-    # results.to_csv(OUTPUT_FILE, index=False)
+    # Predict
+    y_pred_encoded = model.predict(X)
+    y_pred = label_encoder.inverse_transform(y_pred_encoded)
+    y_proba = model.predict_proba(X)
+    confidence = np.max(y_proba, axis=1)
 
-    print(f"Predictions saved to {OUTPUT_FILE}")
+    # Build output
+    id_col = raw_df["encounter_id"] if "encounter_id" in raw_df.columns else range(len(raw_df))
+
+    results = pd.DataFrame({
+        "id": id_col.values if hasattr(id_col, 'values') else id_col,
+        "prediction": y_pred,
+        "confidence": np.round(confidence, 4),
+        "metric_name": "f1_weighted",
+        "metric_value": round(metrics.get("f1_weighted", 0.0), 4),
+    })
+
+    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    results.to_csv(OUTPUT_FILE, index=False)
+    print(f"Predictions saved to {OUTPUT_FILE} ({len(results)} rows)")
 
 
 if __name__ == "__main__":
